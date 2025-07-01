@@ -1,4 +1,4 @@
-name: CI/CD Pipeline
+name: CI - Build and SonarQube Analysis
 
 on:
   push:
@@ -10,50 +10,37 @@ env:
 jobs:
   build-test:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
           node-version: 18
 
-      - run: npm ci
+      - name: Install Dependencies
+        run: npm ci
 
-      - run: npm run test
+      - name: Run Tests with Coverage
+        run: npm run test
         env:
           CI: true
 
-      - name: Upload coverage to SonarQube
+      - name: Install SonarScanner
         run: |
-          sonar-scanner \
+          wget https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip
+          unzip sonar-scanner-cli-5.0.1.3006-linux.zip
+          mv sonar-scanner-5.0.1.3006-linux sonar-scanner
+
+      - name: Run SonarQube Analysis
+        run: |
+          ./sonar-scanner/bin/sonar-scanner \
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }} \
+            -Dsonar.sources=src \
+            -Dsonar.tests=src \
+            -Dsonar.test.inclusions=src/**/*test.* \
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
+            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
             -Dsonar.login=${{ secrets.SONAR_TOKEN }}
-        env:
-          SONAR_SCANNER_OPTS: "-Dsonar.projectKey=my-app"
-
-  deploy:
-    needs: build-test
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && success()
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Build Production
-        run: |
-          npm ci
-          npm run build
-
-      - name: Deploy to S3 (example)
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-region: ap-south-1
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-web-identity-token-file: ${{ secrets.AWS_WEB_IDENTITY_TOKEN_FILE }}
-
-      - name: Sync S3
-        run: |
-          aws s3 sync build/ s3://my-react-app-bucket --delete
-
-      - name: Invalidate CloudFront cache
-        run: |
-          aws cloudfront create-invalidation --distribution-id ${{ secrets.CF_DIST_ID }} --paths "/*"
